@@ -34,6 +34,9 @@ static const char *TAG = "MQTTPublisherESP32";
 static const char* topic_str = "coords";
 static bool connection_status = false;
 
+static float angle[3] = {10.0f, 20.0f, 45.0f};
+
+
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
@@ -159,7 +162,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());      
    
 
-    __attribute__((__unused__)) int pb_res;
+    
     esp_mqtt_client_config_t mqtt_cfg = getConfigMQTT();
     esp_mqtt_client_handle_t mqtt_handle;
     mqtt_handle = esp_mqtt_client_init(&mqtt_cfg);
@@ -173,12 +176,16 @@ void app_main(void)
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
      * examples/protocols/README.md for more information about this function.
      */
-    ESP_ERROR_CHECK(example_connect());
+    ESP_ERROR_CHECK(example_connect());  
+    
+    char buffer[64];
+    sprintf(buffer, "%f,%f,%f\r\n", angle[0], angle[1], angle[2]);
+    
     while(true)
     {
-        esp_mqtt_client_publish(mqtt_handle, topic_str, "Remote Device: esp32 connected!!!", 0, 1, 0);
+        esp_mqtt_client_publish(mqtt_handle, topic_str, buffer, sizeof(buffer), 1, 0);
         vTaskDelay(1000);
     }
-    
+
 }
 
