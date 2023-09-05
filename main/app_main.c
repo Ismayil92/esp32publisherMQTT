@@ -1,12 +1,3 @@
-/* MQTT (over TCP) Example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -30,12 +21,18 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 
+
+TaskHandle_t angle_modifier_handle = NULL;
+TaskHandle_t publisher_handle = NULL;
+esp_mqtt_client_handle_t mqtt_handle = NULL;
+SemaphoreHandle_t xSemaphore = NULL;
+const TickType_t delay_ms = pdMS_TO_TICKS(10);
+
 static const char *TAG = "MQTTPublisherESP32";
 static const char* topic_str = "coords";
 static bool connection_status = false;
 
 static float angle[3] = {10.0f, 20.0f, 45.0f};
-
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -60,48 +57,50 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
-    switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(client, topic_str, "Remote Device: esp32 connected!!!", 0, 1, 0);
-        connection_status = true;
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);    
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        connection_status = false;
-        msg_id = esp_mqtt_client_publish(client, topic_str, "Remote Device: esp32 disconnected!!!", 0, 1, 0);
-        break;
 
-    case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
-        break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-            log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
-            log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
-            log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
-            ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+    switch ((esp_mqtt_event_id_t)event_id) 
+    {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+            msg_id = esp_mqtt_client_publish(client, topic_str, "Remote Device: esp32 connected!!!", 0, 1, 0);
+            connection_status = true;
+            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);    
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+            connection_status = false;
+            msg_id = esp_mqtt_client_publish(client, topic_str, "Remote Device: esp32 disconnected!!!", 0, 1, 0);
+            break;
+
+        case MQTT_EVENT_SUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+            msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
+            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+            break;
+        case MQTT_EVENT_UNSUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_PUBLISHED:
+            ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_DATA:
+            ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+            printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+            printf("DATA=%.*s\r\n", event->data_len, event->data);
+            break;
+        case MQTT_EVENT_ERROR:
+            ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
+                log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
+                log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
+                ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+            }
+            break;
+        default:
+            ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+            break;
         }
-        break;
-    default:
-        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
-        break;
-    }
 }
 
 
@@ -140,7 +139,37 @@ static esp_mqtt_client_config_t getConfigMQTT(void)
 }
 
 
+void angleDeviate(void* pvParameters)
+{   
+    while(true)
+    {   
+        if( xSemaphoreTake( xSemaphore, delay_ms ) == pdTRUE )
+        {
+            angle[1] += 1.0f;        
+            vTaskDelay(pdMS_TO_TICKS(100));  
+            xSemaphoreGive(xSemaphore);
+        }         
+    }
+}
 
+
+
+void vectorPublisher(void* pvParameters)
+{
+    
+    char buffer[64];
+    
+    while(true)
+    {
+        if( xSemaphoreTake( xSemaphore, delay_ms ) == pdTRUE )
+        {
+            sprintf(buffer, "%f,%f,%f\r\n", angle[0], angle[1], angle[2]);
+            esp_mqtt_client_publish(mqtt_handle, topic_str, buffer, sizeof(buffer), 1, 0);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            xSemaphoreGive(xSemaphore);
+        }    
+    }
+}
 
 void app_main(void)
 {
@@ -159,33 +188,55 @@ void app_main(void)
 
     //initialize network connection 
     ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_netif_init());      
+    ESP_ERROR_CHECK(esp_netif_init());  
    
-
-    
+    //Create mqtt handler
     esp_mqtt_client_config_t mqtt_cfg = getConfigMQTT();
-    esp_mqtt_client_handle_t mqtt_handle;
     mqtt_handle = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(mqtt_handle, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(mqtt_handle);
 
-
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    ESP_ERROR_CHECK(example_connect());  
-    
-    char buffer[64];
-    sprintf(buffer, "%f,%f,%f\r\n", angle[0], angle[1], angle[2]);
-    
-    while(true)
+    * Read "Establishing Wi-Fi or Ethernet Connection" section in
+    * examples/protocols/README.md for more information about this function.
+    */
+    ESP_ERROR_CHECK(example_connect());
+
+
+    //create a binary semaphore
+    vSemaphoreCreateBinary( xSemaphore );
+    if(xSemaphore!=NULL)
     {
-        esp_mqtt_client_publish(mqtt_handle, topic_str, buffer, sizeof(buffer), 1, 0);
-        vTaskDelay(1000);
+        //create publsher task handler
+        BaseType_t publisher_handle_res = xTaskCreatePinnedToCore(vectorPublisher,
+                                            "VectorPublisher",
+                                            4000,
+                                            NULL,
+                                            1,
+                                            &publisher_handle,
+                                            1);
+
+        //create angle modifier task handler 
+        BaseType_t angle_handle_res = xTaskCreatePinnedToCore(angleDeviate, 
+                                    "AngleModifier",
+                                    4000,
+                                    NULL,
+                                    2,
+                                    &angle_modifier_handle,
+                                    1);
+
+            
+        if(angle_handle_res != pdTRUE || publisher_handle_res != pdTRUE)
+        {
+           ESP_LOGE(TAG, "Not enough memory to create the tasks!!!\n");
+           return;
+        }
+        ESP_LOGI(TAG, "All Tasks successfully created!!!\n");
+        
     }
+    
 
 }
 

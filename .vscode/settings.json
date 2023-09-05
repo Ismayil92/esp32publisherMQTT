@@ -8,6 +8,7 @@
   ],
   "idf.flashType": "JTAG",
   "files.associations": {
-    "esp_system.h": "c"
+    "esp_system.h": "c",
+    "queue.h": "c"
   }
 }
