@@ -26,13 +26,13 @@ TaskHandle_t angle_modifier_handle = NULL;
 TaskHandle_t publisher_handle = NULL;
 esp_mqtt_client_handle_t mqtt_handle = NULL;
 SemaphoreHandle_t xSemaphore = NULL;
-const TickType_t delay_ms = pdMS_TO_TICKS(10);
+const TickType_t delay_ms = pdMS_TO_TICKS(1);
 
 static const char *TAG = "MQTTPublisherESP32";
 static const char* topic_str = "coords";
 static bool connection_status = false;
 
-static float angle[3] = {10.0f, 20.0f, 45.0f};
+static float angle[3] = {0.0f};
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -141,13 +141,15 @@ static esp_mqtt_client_config_t getConfigMQTT(void)
 
 void angleDeviate(void* pvParameters)
 {   
+    const char* tag = "angleDeviate";
     while(true)
     {   
         if( xSemaphoreTake( xSemaphore, delay_ms ) == pdTRUE )
         {
             angle[1] += 1.0f;        
-            vTaskDelay(pdMS_TO_TICKS(100));  
+            ESP_LOGI(tag, "AngleDeviate: Gamma angle %f", angle[1]);
             xSemaphoreGive(xSemaphore);
+            vTaskDelay(pdMS_TO_TICKS(2500));             
         }         
     }
 }
@@ -156,17 +158,18 @@ void angleDeviate(void* pvParameters)
 
 void vectorPublisher(void* pvParameters)
 {
-    
+    const char* tag = "vectorPublished";
     char buffer[64];
     
     while(true)
     {
         if( xSemaphoreTake( xSemaphore, delay_ms ) == pdTRUE )
-        {
+        {   
             sprintf(buffer, "%f,%f,%f\r\n", angle[0], angle[1], angle[2]);
             esp_mqtt_client_publish(mqtt_handle, topic_str, buffer, sizeof(buffer), 1, 0);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            ESP_LOGI(tag, "Gamma angle published: %f", angle[1]);
             xSemaphoreGive(xSemaphore);
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }    
     }
 }
@@ -223,7 +226,7 @@ void app_main(void)
                                     "AngleModifier",
                                     4000,
                                     NULL,
-                                    2,
+                                    1,
                                     &angle_modifier_handle,
                                     1);
 
